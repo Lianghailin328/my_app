@@ -20,12 +20,18 @@ jobs:
         with:
           python-version: '3.10'
 
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
       - name: Install Buildozer Dependencies
         run: |
           sudo apt update
           sudo apt install -y git zip unzip autoconf libtool pkg-config zlib1g-dev \
           libncurses5-dev libncursesw5-dev libtinfo5 cmake libffi-dev libssl-dev \
-          python3-pip build-essential openjdk-17-jdk aidl
+          python3-pip build-essential openjdk-17-jdk aidl libgmp-dev
 
       - name: Install Buildozer and Cython
         run: |
@@ -38,37 +44,42 @@ jobs:
             ~/.local/bin/buildozer init
           fi
           
-          # --- 核心权限与配置注入 ---
+          # --- 核心配置注入 ---
           sed -i 's/^title =.*/title = DishwasherControl/' buildozer.spec
           sed -i 's/^package.name =.*/package.name = dishwasherapp/' buildozer.spec
           sed -i 's/^package.domain =.*/package.domain = org.test/' buildozer.spec
           
-          # 2. 依赖项 (添加 bleak 和必要底层库)
+          # 2. 依赖项
           sed -i 's/^requirements =.*/requirements = python3,kivy==2.3.0,bleak,pyjnius,android,asyncio/' buildozer.spec
           
-          # 3. 安卓 API 级别 (API 31 支持 Android 12+ 蓝牙权限)
+          # 3. 安卓 API (API 31 是为了满足 Android 12 的蓝牙权限)
           sed -i 's/^android.api =.*/android.api = 31/' buildozer.spec
           sed -i 's/^#android.minapi =.*/android.minapi = 21/' buildozer.spec
           sed -i 's/^#android.ndk =.*/android.ndk = 25b/' buildozer.spec
           
-          # 4. 显式添加蓝牙相关权限
+          # 4. 蓝牙权限 (Android 12+)
           sed -i 's/^android.permissions =.*/android.permissions = BLUETOOTH_SCAN, BLUETOOTH_CONNECT, BLUETOOTH_ADVERTISE, ACCESS_FINE_LOCATION, ACCESS_COARSE_LOCATION/' buildozer.spec
           
-          # 5. 渲染架构优化
-          sed -i 's/^#android.p4a_extra_args =.*/android.p4a_extra_args = --common-args="--webkit-force-dark-mode"/' buildozer.spec
+          # 5. 架构与优化
+          sed -i 's/^#android.archs =.*/android.archs = arm64-v8a/' buildozer.spec
+          sed -i 's/^#android.allow_backup =.*/android.allow_backup = False/' buildozer.spec
 
       - name: Build with Buildozer
         run: |
-          # 移除手动的 sdkmanager 调用，Buildozer 会在第一次运行时自动下载所需 SDK 31
-          # 将 buildozer 添加到路径并运行
+          # 清除系统预设的可能会干扰 Buildozer 的 NDK 环境变量
+          unset ANDROID_NDK_HOME
+          unset ANDROID_NDK_ROOT
+          
           export PATH=$PATH:~/.local/bin
+          # 使用 --allow-root 并非因为是 root，而是为了防止 GitHub Actions 的容器权限报错
           buildozer -v android debug
         env:
-          # 自动接受 SDK 许可协议
           APP_ANDROID_ACCEPT_SDK_LICENSE: "1"
+          # 显式指定 JAVA_HOME 确保 Buildozer 使用 JDK 17
+          JAVA_HOME: ${{ env.JAVA_HOME_17_X64 }}
 
       - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: Dishwasher-APK
-          path: bin/*.apk
+          uses: actions/upload-artifact@v4
+          with:
+            name: Dishwasher-APK
+            path: bin/*.apk
