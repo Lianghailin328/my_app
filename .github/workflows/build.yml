@@ -3,7 +3,7 @@ name: Build Android APK
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:
+  workflow_dispatch: # 允许手动点击按钮触发
 
 jobs:
   build:
@@ -13,7 +13,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 关键修正点 1：使用官方 Action 显式设置 JDK 17
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
@@ -39,25 +38,31 @@ jobs:
         run: |
           export PATH=$PATH:$HOME/.local/bin
           
-          # 如果仓库没有 spec，重新生成并严格配置
-          if [ ! -f buildozer.spec ]; then
-            buildozer init
+          # 1. 如果仓库里有旧的 spec，先删除，防止重复配置导致 DuplicateOptionError
+          if [ -f buildozer.spec ]; then
+            rm buildozer.spec
           fi
           
-          # 关键修正点 2：使用 sed 强制指定稳定的版本配置
-          sed -i 's/^requirements = .*$/requirements = python3,kivy==2.3.0,bleak,asyncio/' buildozer.spec
-          sed -i 's/^#android.permissions = .*$/android.permissions = BLUETOOTH, BLUETOOTH_ADMIN, ACCESS_FINE_LOCATION, ACCESS_COARSE_LOCATION, BLUETOOTH_SCAN, BLUETOOTH_CONNECT, INTERNET/' buildozer.spec
-          sed -i 's/^#android.api = .*$/android.api = 31/' buildozer.spec
-          sed -i 's/^#android.minapi = .*$/android.minapi = 21/' buildozer.spec
-          sed -i 's/^#android.ndk = .*$/android.ndk = 25b/' buildozer.spec
-          # 缩减架构以减少编译失败率
-          sed -i 's/^android.archs = .*$/android.archs = arm64-v8a/' buildozer.spec
+          # 2. 生成全新的干净 spec 文件
+          buildozer init
           
-          # 运行打包，使用 yes 命令自动同意所有 Android 协议
+          # 3. 精准修改 spec 中的核心配置（使用 sed，确保不重复且格式正确）
+          # [Requirements] 增加 asyncio
+          sed -i 's/^requirements = .*$/requirements = python3,kivy==2.3.0,bleak,asyncio/' buildozer.spec
+          # [Permissions] 严格逗号分隔，无空格
+          sed -i 's/^# android.permissions = .*$/android.permissions = BLUETOOTH,BLUETOOTH_ADMIN,ACCESS_FINE_LOCATION,ACCESS_COARSE_LOCATION,BLUETOOTH_SCAN,BLUETOOTH_CONNECT,INTERNET/' buildozer.spec
+          # [API & NDK] 设置稳定版本
+          sed -i 's/^# android.api = .*$/android.api = 31/' buildozer.spec
+          sed -i 's/^# android.minapi = .*$/android.minapi = 21/' buildozer.spec
+          sed -i 's/^# android.ndk_api = .*$/android.ndk_api = 21/' buildozer.spec
+          # [Archs] 只编译 arm64-v8a 提高成功率
+          sed -i 's/^# android.archs = .*$/android.archs = arm64-v8a/' buildozer.spec
+          
+          # 4. 开始打包。yes 命令自动同意所有 Android 许可协议
           yes | buildozer -v android debug
           
       - name: Upload APK Artifact
-        if: always() # 即使失败也尝试上传日志
+        if: always() # 即使 Buildozer 失败也尝试上传已生成的日志或文件
         uses: actions/upload-artifact@v4
         with:
           name: dishwasher-apk
