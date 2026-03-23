@@ -1,9 +1,9 @@
-name: Build APK
+name: Build Android APK
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
+  workflow_dispatch: # 允许手动触发
 
 jobs:
   build:
@@ -17,18 +17,37 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.10"
-          cache: false
+          # 注意：为了避免找不到 requirements.txt 报错，我们先关闭自动 cache
+          # 稍后可以手动添加缓存逻辑
 
-      - name: Upgrade pip
+      - name: Install System Dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y git zip unzip openjdk-17-jdk python3-pip autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo5 cmake libffi-dev libssl-dev
+
+      - name: Install Python Package Tools
         run: |
           python -m pip install --upgrade pip
+          pip install buildozer Cython==0.29.33 setuptools
 
-      - name: Install dependencies
+      - name: Build APK with Buildozer
         run: |
-          # 这里至少写一行命令，不然 YAML 会报错
-          echo "Installing dependencies..."
-          pip install -r requirements.txt
-
-      - name: Build APK
-        run: |
-          echo "Build commands go here"
+          # 确保环境变量正确
+          export PATH=$PATH:$HOME/.local/bin
+          
+          # 检查是否存在 buildozer.spec，不存在则初始化（占位逻辑）
+          if [ ! -f buildozer.spec ]; then
+            buildozer init
+            # 这里你可以用 sed 命令自动替换 spec 里的 requirements 等
+            sed -i 's/^requirements = .*$/requirements = python3,kivy,bleak/' buildozer.spec
+            sed -i 's/^#android.permissions = .*$/android.permissions = BLUETOOTH, BLUETOOTH_ADMIN, ACCESS_FINE_LOCATION, BLUETOOTH_SCAN, BLUETOOTH_CONNECT/' buildozer.spec
+          fi
+          
+          # 核心打包命令（使用 --yes 自动同意所有许可证）
+          buildozer -v android debug
+          
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dishwasher-apk
+          path: bin/*.apk
