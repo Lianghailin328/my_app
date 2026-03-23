@@ -2,7 +2,7 @@
 import os
 import platform
 
-# 1. 关键修复：解决 SDL/Android 渲染冲突
+# 1. 渲染性能补丁（解决 Android 12+ 闪退）
 if platform.system() == 'Android' or 'ANDROID_ARGUMENT' in os.environ:
     os.environ['KIVY_GRAPHICS'] = 'gles'
     os.environ['RENDER_THREAD'] = '0'
@@ -10,25 +10,35 @@ if platform.system() == 'Android' or 'ANDROID_ARGUMENT' in os.environ:
 
 from kivy.utils import platform as kivy_platform
 
-# 2. 窗口与字体适配 (针对中文字体方框问题)
+# 2. 核心补丁：强制调用安卓系统 NotoSansCJK 字体
 if kivy_platform == 'android':
-    font_paths = [
-        '/system/fonts/NotoSansCJK-Regular.ttc',
-        '/system/fonts/DroidSansFallback.ttf',
-        '/system/fonts/NotoSansSC-Regular.otf'
+    import os
+    from kivy.core.text import LabelBase
+    from kivy.config import Config
+
+    # 安卓系统典型的中文字体存放路径清单
+    cjk_fonts = [
+        '/system/fonts/NotoSansCJK-Regular.ttc',    # 现代安卓 NotoSans
+        '/system/fonts/NotoSansSC-Regular.otf',    # 部分系统版本
+        '/system/fonts/DroidSansFallback.ttf'      # 老版本安卓
     ]
-    target_font = None
-    for p in font_paths:
-        if os.path.exists(p):
-            target_font = p
+    
+    found_font = None
+    for f in cjk_fonts:
+        if os.path.exists(f):
+            found_font = f
             break
     
-    if target_font:
-        from kivy.core.text import LabelBase
-        LabelBase.register(name='DroidSansFallback', fn_regular=target_font)
-        from kivy.config import Config
-        Config.set('kivy', 'default_font', ['DroidSansFallback', target_font])
+    if found_font:
+        # 注册这个字体为默认中文字体
+        LabelBase.register(name='NotoSettings', fn_regular=found_font)
+        # 关键：通过 Config 强制 Kivy 全局使用这个字体，否则所有的 Label 都需要手动设 font_name
+        Config.set('kivy', 'default_font', ['NotoSettings', found_font])
+        
+        # 针对安卓 12+ 解决部分组件依然乱码的小窍门
+        os.environ['KIVY_FONT_ALIAS'] = f'{{"DroidSans": "{found_font}"}}'
 
+# --- 接下来再导入 App, Label 等组件 ---
 from kivy.app import App
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.button import Button
