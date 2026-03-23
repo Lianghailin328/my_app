@@ -3,11 +3,11 @@ name: Build Android APK
 on:
   push:
     branches: [ main ]
-  workflow_dispatch: # 允许手动触发
+  workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04  # 修正：固定在更稳定的 22.04 版本
 
     steps:
       - name: Checkout repository
@@ -17,12 +17,11 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.10"
-          # 注意：为了避免找不到 requirements.txt 报错，我们先关闭自动 cache
-          # 稍后可以手动添加缓存逻辑
 
       - name: Install System Dependencies
         run: |
           sudo apt update
+          # 安装编译 Android 所需的基础库
           sudo apt install -y git zip unzip openjdk-17-jdk python3-pip autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo5 cmake libffi-dev libssl-dev
 
       - name: Install Python Package Tools
@@ -32,19 +31,16 @@ jobs:
 
       - name: Build APK with Buildozer
         run: |
-          # 确保环境变量正确
           export PATH=$PATH:$HOME/.local/bin
-          
-          # 检查是否存在 buildozer.spec，不存在则初始化（占位逻辑）
+          # 如果仓库没有 spec，就初始化并修改权限配置
           if [ ! -f buildozer.spec ]; then
             buildozer init
-            # 这里你可以用 sed 命令自动替换 spec 里的 requirements 等
             sed -i 's/^requirements = .*$/requirements = python3,kivy,bleak/' buildozer.spec
-            sed -i 's/^#android.permissions = .*$/android.permissions = BLUETOOTH, BLUETOOTH_ADMIN, ACCESS_FINE_LOCATION, BLUETOOTH_SCAN, BLUETOOTH_CONNECT/' buildozer.spec
+            sed -i 's/^#android.permissions = .*$/android.permissions = BLUETOOTH, BLUETOOTH_ADMIN, ACCESS_FINE_LOCATION, BLUETOOTH_SCAN, BLUETOOTH_CONNECT, INTERNET/' buildozer.spec
+            sed -i 's/^#android.api = .*$/android.api = 31/' buildozer.spec
           fi
-          
-          # 核心打包命令（使用 --yes 自动同意所有许可证）
-          buildozer -v android debug
+          # 运行打包（自动同意许可证）
+          yes | buildozer -v android debug
           
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
