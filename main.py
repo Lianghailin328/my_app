@@ -1,5 +1,14 @@
 ﻿# -*- coding: utf-8 -*-
 import os
+import platform
+
+# 关键修复：解决 SDL/Android 互斥锁崩溃问题
+if platform.system() == 'Android' or 'ANDROID_ARGUMENT' in os.environ:
+    os.environ['KIVY_GRAPHICS'] = 'gles' # 强制使用 GLES
+    os.environ['RENDER_THREAD'] = '0'     # 禁用渲染线程，防止 pthread 冲突
+    # 下面这行特别针对你看到的 hwuiTask1 崩溃
+    os.environ['APP_SHORTCUT_RENDER_THREAD'] = '0'
+
 from kivy.utils import platform
 
 # 1. 窗口设置 (只有在桌面端才设置固定分辨率，安卓端跳过避免初始化报错)
@@ -56,6 +65,7 @@ class StyledButton(Button):
 class DishwasherControlApp(App):
     def build(self):
         self.title = "洗碗机控制客户端"
+        Window.clearcolor = (1, 1, 1, 1)  # 将背景颜色设置为白色 (R, G, B, A)
         
         # 1. 初始化异步环境
         try:
@@ -253,4 +263,30 @@ class DishwasherControlApp(App):
         except: pass
 
 if __name__ == "__main__":
-    DishwasherControlApp().run()
+    import asyncio
+    import traceback
+    
+    # 强制开启控制台日志
+    import os
+    os.environ['KIVY_LOG_MODE'] = 'PYTHON'
+
+    app = DishwasherControlApp()
+    
+    async def main_loop():
+        try:
+            # 使用 async_run 让 Kivy 运行在异步循环中
+            await app.async_run()
+        except Exception:
+            # 万一崩溃，把堆栈信息打印到 adb logcat
+            print("--- CRITICAL APP CRASH ---")
+            print(traceback.format_exc())
+        finally:
+            # 确保退出时清理
+            if hasattr(app, 'ble_client') and app.ble_client:
+                await app.ble_client.disconnect()
+
+    # 启动异步主循环
+    try:
+        asyncio.run(main_loop())
+    except Exception as e:
+        print(f"MAIN LOOP FAILED: {e}")
