@@ -7,11 +7,18 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04  # 修正：固定在更稳定的 22.04 版本
+    runs-on: ubuntu-22.04
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      # 关键修正点 1：使用官方 Action 显式设置 JDK 17
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
 
       - name: Set up Python 3.10
         uses: actions/setup-python@v5
@@ -21,8 +28,7 @@ jobs:
       - name: Install System Dependencies
         run: |
           sudo apt update
-          # 安装编译 Android 所需的基础库
-          sudo apt install -y git zip unzip openjdk-17-jdk python3-pip autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo5 cmake libffi-dev libssl-dev
+          sudo apt install -y git zip unzip python3-pip autoconf libtool pkg-config zlib1g-dev libncurses5-dev libncursesw5-dev libtinfo5 cmake libffi-dev libssl-dev
 
       - name: Install Python Package Tools
         run: |
@@ -32,17 +38,26 @@ jobs:
       - name: Build APK with Buildozer
         run: |
           export PATH=$PATH:$HOME/.local/bin
-          # 如果仓库没有 spec，就初始化并修改权限配置
+          
+          # 如果仓库没有 spec，重新生成并严格配置
           if [ ! -f buildozer.spec ]; then
             buildozer init
-            sed -i 's/^requirements = .*$/requirements = python3,kivy,bleak/' buildozer.spec
-            sed -i 's/^#android.permissions = .*$/android.permissions = BLUETOOTH, BLUETOOTH_ADMIN, ACCESS_FINE_LOCATION, BLUETOOTH_SCAN, BLUETOOTH_CONNECT, INTERNET/' buildozer.spec
-            sed -i 's/^#android.api = .*$/android.api = 31/' buildozer.spec
           fi
-          # 运行打包（自动同意许可证）
+          
+          # 关键修正点 2：使用 sed 强制指定稳定的版本配置
+          sed -i 's/^requirements = .*$/requirements = python3,kivy==2.3.0,bleak,asyncio/' buildozer.spec
+          sed -i 's/^#android.permissions = .*$/android.permissions = BLUETOOTH, BLUETOOTH_ADMIN, ACCESS_FINE_LOCATION, ACCESS_COARSE_LOCATION, BLUETOOTH_SCAN, BLUETOOTH_CONNECT, INTERNET/' buildozer.spec
+          sed -i 's/^#android.api = .*$/android.api = 31/' buildozer.spec
+          sed -i 's/^#android.minapi = .*$/android.minapi = 21/' buildozer.spec
+          sed -i 's/^#android.ndk = .*$/android.ndk = 25b/' buildozer.spec
+          # 缩减架构以减少编译失败率
+          sed -i 's/^android.archs = .*$/android.archs = arm64-v8a/' buildozer.spec
+          
+          # 运行打包，使用 yes 命令自动同意所有 Android 协议
           yes | buildozer -v android debug
           
       - name: Upload APK Artifact
+        if: always() # 即使失败也尝试上传日志
         uses: actions/upload-artifact@v4
         with:
           name: dishwasher-apk
