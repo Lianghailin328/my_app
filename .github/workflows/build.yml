@@ -39,20 +39,19 @@ jobs:
           fi
           
           # --- 核心权限与配置注入 ---
-          # 1. 标题和包名
           sed -i 's/^title =.*/title = DishwasherControl/' buildozer.spec
           sed -i 's/^package.name =.*/package.name = dishwasherapp/' buildozer.spec
           sed -i 's/^package.domain =.*/package.domain = org.test/' buildozer.spec
           
-          # 2. 依赖项 (必须包含 bleak, pyjnius, android)
+          # 2. 依赖项 (添加 bleak 和必要底层库)
           sed -i 's/^requirements =.*/requirements = python3,kivy==2.3.0,bleak,pyjnius,android,asyncio/' buildozer.spec
           
-          # 3. 安卓 API 级别 (为了蓝牙权限必须 API 31+)
+          # 3. 安卓 API 级别 (API 31 支持 Android 12+ 蓝牙权限)
           sed -i 's/^android.api =.*/android.api = 31/' buildozer.spec
           sed -i 's/^#android.minapi =.*/android.minapi = 21/' buildozer.spec
           sed -i 's/^#android.ndk =.*/android.ndk = 25b/' buildozer.spec
           
-          # 4. 显式添加蓝牙相关权限 (Android 12+)
+          # 4. 显式添加蓝牙相关权限
           sed -i 's/^android.permissions =.*/android.permissions = BLUETOOTH_SCAN, BLUETOOTH_CONNECT, BLUETOOTH_ADVERTISE, ACCESS_FINE_LOCATION, ACCESS_COARSE_LOCATION/' buildozer.spec
           
           # 5. 渲染架构优化
@@ -60,12 +59,13 @@ jobs:
 
       - name: Build with Buildozer
         run: |
-          # 强制安装 android-sdk 中的 build-tools (包含 aidl)
-          yes | sdkmanager --sdk_root=$ANDROID_HOME "build-tools;31.0.0" "platform-tools" "platforms;android-31"
+          # 移除手动的 sdkmanager 调用，Buildozer 会在第一次运行时自动下载所需 SDK 31
+          # 将 buildozer 添加到路径并运行
           export PATH=$PATH:~/.local/bin
           buildozer -v android debug
         env:
-          ACCEPT_SDK_LICENSE: "yes"
+          # 自动接受 SDK 许可协议
+          APP_ANDROID_ACCEPT_SDK_LICENSE: "1"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
