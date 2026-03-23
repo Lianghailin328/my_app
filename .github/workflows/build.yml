@@ -50,22 +50,18 @@ jobs:
           # 3. 安卓 API 级别 (为了蓝牙权限必须 API 31+)
           sed -i 's/^android.api =.*/android.api = 31/' buildozer.spec
           sed -i 's/^#android.minapi =.*/android.minapi = 21/' buildozer.spec
-          sed -i 's/^#android.sdk =.*/android.sdk = 31/' buildozer.spec
           sed -i 's/^#android.ndk =.*/android.ndk = 25b/' buildozer.spec
           
           # 4. 显式添加蓝牙相关权限 (Android 12+)
-          # 扫描、连接、定位
           sed -i 's/^android.permissions =.*/android.permissions = BLUETOOTH_SCAN, BLUETOOTH_CONNECT, BLUETOOTH_ADVERTISE, ACCESS_FINE_LOCATION, ACCESS_COARSE_LOCATION/' buildozer.spec
           
           # 5. 渲染架构优化
           sed -i 's/^#android.p4a_extra_args =.*/android.p4a_extra_args = --common-args="--webkit-force-dark-mode"/' buildozer.spec
-          
-          # 6. 关闭多线程渲染补丁 (针对 Kivy 闪退)
-          # 注意：这是写在 main.py 里的，但通过 spec 确保 android 权限生效
 
       - name: Build with Buildozer
         run: |
-          # 赋予脚本执行权限并启动构建
+          # 强制安装 android-sdk 中的 build-tools (包含 aidl)
+          yes | sdkmanager --sdk_root=$ANDROID_HOME "build-tools;31.0.0" "platform-tools" "platforms;android-31"
           export PATH=$PATH:~/.local/bin
           buildozer -v android debug
         env:
