@@ -18,9 +18,12 @@ if kivy_platform == 'android':
 
     # 安卓系统典型的中文字体存放路径清单
     cjk_fonts = [
-        '/system/fonts/NotoSansCJK-Regular.ttc',    # 现代安卓 NotoSans
-        '/system/fonts/NotoSansSC-Regular.otf',    # 部分系统版本
-        '/system/fonts/DroidSansFallback.ttf'      # 老版本安卓
+        '/system/fonts/NotoSansCJK-Regular.ttc',    # Android 现代系统
+        '/system/fonts/NotoSansSC-Regular.otf',     # 部分国产 OS
+        '/system/fonts/DroidSansFallback.ttf',      # 老版本 Android
+        '/product/fonts/NotoSansCJK-Regular.ttc',   # 部分 Android 11+ 新路径
+        '/system/fonts/SourceHanSansCN-Regular.otf'，
+        '/system/fonts/OSans-RC-Regular.ttf'​ # 华为等厂商可能使用的路径
     ]
     
     found_font = None
