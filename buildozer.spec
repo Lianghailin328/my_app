@@ -38,8 +38,7 @@ version = 0.1
 # (list) Application requirements
 # comma separated e.g. requirements = sqlite3,kivy
 # ⚠️ 这里加入了关键的 android 和 jnius 依赖供 Bleak 底层调用
-requirements = python3,kivy,bleak,android,jnius
-
+requirements = python3==3.9.9,hostpython3==3.9.9,kivy==2.3.0,android,jnius,bleak==0.20.1
 # (str) Custom source folders for requirements
 # Sets custom source for any requirements with recipes
 # requirements.source.kivy = ../../kivy
@@ -99,11 +98,11 @@ fullscreen = 0
 android.permissions = BLUETOOTH,BLUETOOTH_ADMIN,ACCESS_FINE_LOCATION,ACCESS_COARSE_LOCATION,BLUETOOTH_SCAN,BLUETOOTH_CONNECT,INTERNET
 
 # (list) features (adds uses-feature -tags to manifest)
-android.features = android.hardware.bluetooth_le
+#android.features = android.hardware.bluetooth_le
 
 # (int) Target Android API, should be as high as possible.
 # ⚠️ 目标需对齐高版本以满足 Google Play 及 Bleak 规范
-android.api = 33
+android.api = 31
 
 # (int) Minimum API your APK / AAB will support.
 android.minapi = 24
@@ -115,7 +114,7 @@ android.minapi = 24
 #android.ndk = 23b
 
 # (int) Android NDK API to use. This is the minimum API your app will support, it should usually match android.minapi.
-android.ndk_api = 24
+android.ndk_api = 21
 
 # (bool) Use --private data storage (True) or --dir public storage (False)
 #android.private_storage = True
@@ -348,7 +347,7 @@ android.allow_backup = True
 # Setting this to false will pass --ignore-setup-py, true will pass --use-setup-py
 # NOTE: this is general setuptools integration, having pyproject.toml is enough, no need to generate
 # setup.py if you're using Poetry, but you need to add "toml" to source.include_exts.
-#p4a.setup_py = false
+p4a.setup_py = false
 
 # (str) extra command line arguments to pass when invoking pythonforandroid.toolchain
 #p4a.extra_args =
