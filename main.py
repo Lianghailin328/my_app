@@ -27,7 +27,7 @@ if os.path.exists(font_path):
     
     # 终极补丁：强制全局接管 Label 和 Button 的属性表，杜绝 Kivy 悄悄回退到英文 Roboto 字体
     from kivy.lang import Builder
-    Builder.load_string('''
+    Builder.load_string(''''
 <Label>:
     font_name: 'NotoSettings'
 <Button>:
@@ -148,11 +148,15 @@ class DishwasherControlApp(App):
         threading.Thread(target=run_it, daemon=True).start()
 
     def on_start(self):
+        print(f"[DEBUG] on_start() 被调用，平台: {kivy_platform}")
         if kivy_platform == 'android':
             try:
                 from android.permissions import request_permissions, Permission
+                print("[DEBUG] 正在请求蓝牙权限...")
                 request_permissions([Permission.BLUETOOTH_SCAN, Permission.BLUETOOTH_CONNECT, Permission.ACCESS_FINE_LOCATION])
-            except Exception as e: print(f"Permission Error: {e}")
+                print("[DEBUG] 权限请求已发送")
+            except Exception as e: 
+                print(f"[DEBUG] Permission Error: {e}")
 
     def show_device_list(self, instance):
         content = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(10))
@@ -184,16 +188,20 @@ class DishwasherControlApp(App):
         self.scan_devices()
 
     def scan_devices(self):
-        if getattr(self, 'is_scanning', False): return
+        if getattr(self, 'is_scanning', False): 
+            print("[DEBUG] 已有扫描在进行中")
+            return
         self.is_scanning = True
+        print("[DEBUG] scan_devices() 被调用")
         self.status_label.text = "正在后台初始化蓝牙硬件..."
         
         if BleakScanner is None:
+            print("[DEBUG] BleakScanner 为 None - Bleak 库导入失败！")
             self.status_label.text = "请检查 buildozer bleak 依赖"
             self.is_scanning = False
             return
-            
-        # 丢给专门的异步线程去处理蓝牙扫描
+        
+        print("[DEBUG] 启动异步扫描任务")
         self.start_async(self._async_scan_task())
 
     async def _async_scan_task(self):
@@ -207,14 +215,17 @@ class DishwasherControlApp(App):
         
         try:
             # 使用 BleakScanner 的回调模式而不是阻塞式的 discover()
+            # 在 Android 上，扫描时间需要足够长（30秒以上）以发现所有设备
             async with BleakScanner(detection_callback=detection_callback) as scanner:
-                # 持续扫描 16 秒
-                await asyncio.sleep(16.0)
+                #  关键修复：增加扫描时间到 30 秒（移动设备需要更长时间）
+                await asyncio.sleep(30.0)
             
             # 扫描完成后更新状态
             Clock.schedule_once(lambda dt: self._scan_complete())
         except Exception as e:
-            Clock.schedule_once(lambda dt: setattr(self.status_label, "text", f"扫描异常: {str(e)[:30]}"))
+            error_msg = str(e)[:50]
+            print(f"[Bleak扫描错误] {error_msg}")  # 添加日志便于调试
+            Clock.schedule_once(lambda dt: setattr(self.status_label, "text", f"扫描异常: {error_msg}"))
             Clock.schedule_once(lambda dt: setattr(self, 'is_scanning', False))
 
     def _add_device_to_list(self, device):
@@ -237,13 +248,13 @@ class DishwasherControlApp(App):
         # 更新设备计数
         count = len(self.discovered_addresses)
         self.scan_popup.title = f"附近蓝牙设备 (已发现 {count} 台，扫描中...)"
-    
+
     def _update_collapsed_button(self):
         """更新折叠按钮显示数量"""
         if hasattr(self, 'collapsed_btn'):
             count = len(self.collapsed_devices)
             self.collapsed_btn.text = f"查看被折叠的信号 ({count})"
-    
+
     def _scan_complete(self):
         """扫描完成时的处理"""
         count = len(self.discovered_addresses)
