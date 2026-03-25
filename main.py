@@ -84,9 +84,7 @@ class DishwasherControlApp(App):
         Window.clearcolor = (1, 1, 1, 1)
         
         self.client = None
-        self.loop = asyncio.new_event_loop()
-        self.thread = threading.Thread(target=self.run_async_loop, daemon=True)
-        self.thread.start()
+        # 彻底删掉 loop 和 thread，交由 Kivy 的原生异步引擎接管！
         
         root = BoxLayout(orientation="vertical", padding=dp(20), spacing=dp(15))
         
@@ -139,12 +137,15 @@ class DishwasherControlApp(App):
         root.add_widget(BoxLayout()) 
         return root
 
-    def run_async_loop(self):
-        asyncio.set_event_loop(self.loop)
-        self.loop.run_forever()
-
     def start_async(self, coro):
-        asyncio.run_coroutine_threadsafe(coro, self.loop)
+        # 极简版安全隔离层：为每个Bleak操作创建一个独立的小线程去跑asyncio死循环
+        # 这在 Android 11+ JNI 接口中比挂载全局 async_run 更不容易阻塞主界面
+        def run_it():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(coro)
+            loop.close()
+        threading.Thread(target=run_it, daemon=True).start()
 
     def on_start(self):
         if kivy_platform == 'android':
@@ -162,53 +163,49 @@ class DishwasherControlApp(App):
         content.add_widget(scroll)
         self.scan_popup = Popup(title="附近蓝牙设备 (下拉滚动)", content=content, size_hint=(0.9, 0.8))
         self.scan_popup.open()
-        self.start_async(self.scan_devices())
+        
+        # 在主线程直接调用（不加 start_async）
+        self.scan_devices()
 
-    async def scan_devices(self):
-        # 防卡死：避免多次点击重复扫描造成的底层碰撞
+    def scan_devices(self):
         if getattr(self, 'is_scanning', False): return
         self.is_scanning = True
-
-        Clock.schedule_once(lambda dt: setattr(self.status_label, 'text', "正在后台初始化蓝牙硬件..."))
-        # 极为关键：强制释放 GIL 0.2 秒，让 Kivy 有时间渲染上面的“正在初始化”文字到屏幕
-        await asyncio.sleep(0.2)
+        self.status_label.text = "正在后台初始化蓝牙硬件..."
         
         if BleakScanner is None:
-            Clock.schedule_once(lambda dt: setattr(self.status_label, 'text', "请检查 buildozer bleak 依赖"))
+            self.status_label.text = "请检查 buildozer bleak 依赖"
             self.is_scanning = False
             return
+            
+        # 丢给专门的异步线程去处理蓝牙扫描
+        self.start_async(self._async_scan_task())
 
+    async def _async_scan_task(self):
         try:
-            # 移交至 Android JNI 层面运行扫描，Kivy UI 线程此时处于挂起等待中
-            devices = await BleakScanner.discover(timeout=4.0)
-            
-            # 使用内嵌函数将 "更新UI界面" 的任务整体打包，扔给 Kivy 的主线程去执行
-            def render_results(dt):
-                self.device_list_layout.clear_widgets()
-                if not devices:
-                    self.status_label.text = "扫描完成: 未发现设备 (请检查定位和蓝牙)"
-                    self.status_label.color = (1, 0.5, 0, 1)
-                else:
-                    self.status_label.text = f"扫描完成: 发现 {len(devices)} 台设备"
-                    self.status_label.color = (0, 0.6, 0, 1) 
-                    # 动态生成每个设备的连接按钮
-                    for d in devices:
-                        d_name = d.name if d.name else "未知设备"
-                        btn = StyledButton(text=f"{d_name}\n[size=12sp]{d.address}[/size]", markup=True)
-                        btn.btn_color = get_color_from_hex("#424242")
-                        btn.height = dp(60)
-                        btn.size_hint_y = None
-                        btn.bind(on_release=lambda x, dev=d: getattr(self, 'start_async')(self.connect_to_device(dev)))
-                        self.device_list_layout.add_widget(btn)
-                        
-            # 将生成的动作注入主线程 Clock 列队防冲突
-            Clock.schedule_once(render_results)
-            
+            # 脱离主线程的安全独立扫描，设置较长超时以确保设备收集
+            devices = await BleakScanner.discover(timeout=16.0)
+            Clock.schedule_once(lambda dt: self._render_scan_results(devices))
         except Exception as e:
-            msg = f"扫描异常: {str(e)[:30]}"
-            Clock.schedule_once(lambda dt: setattr(self.status_label, "text", msg))
-        finally:
-            self.is_scanning = False
+            Clock.schedule_once(lambda dt: setattr(self.status_label, "text", f"扫描异常: {str(e)[:30]}"))
+            Clock.schedule_once(lambda dt: setattr(self, 'is_scanning', False))
+
+    def _render_scan_results(self, devices):
+        self.device_list_layout.clear_widgets()
+        if not devices:
+            self.status_label.text = "扫描完成: 未发现设备 (请检查定位和蓝牙)"
+            self.status_label.color = (1, 0.5, 0, 1)
+        else:
+            self.status_label.text = f"扫描完成: 发现 {len(devices)} 台设备"
+            self.status_label.color = (0, 0.6, 0, 1) 
+            for d in devices:
+                d_name = d.name if d.name else "未知设备"
+                btn = StyledButton(text=f"{d_name}\n[size=12sp]{d.address}[/size]", markup=True)
+                btn.btn_color = get_color_from_hex("#424242")
+                btn.height = dp(60)
+                btn.size_hint_y = None
+                btn.bind(on_release=lambda x, dev=d: self.start_async(self.connect_to_device(dev)))
+                self.device_list_layout.add_widget(btn)
+        self.is_scanning = False
 
     async def connect_to_device(self, device):
         Clock.schedule_once(lambda dt: setattr(self.status_label, "text", "正在发起连接协议..."))
