@@ -2,6 +2,22 @@
 import os
 import platform
 
+# 创建一个简单的日志处理器，避免 Kivy Logger 的格式化问题
+class SimpleLogger:
+    @staticmethod
+    def info(cat, msg):
+        pass  # 暂时静默
+    
+    @staticmethod
+    def error(cat, msg):
+        pass  # 暂时静默
+    
+    @staticmethod
+    def warning(cat, msg):
+        pass  # 暂时静默
+
+Logger = SimpleLogger()
+
 # 1. 渲染性能补丁（解决 Android 资源调度锁死）
 if platform.system() == 'Android' or 'ANDROID_ARGUMENT' in os.environ:
     os.environ['KIVY_GRAPHICS'] = 'gles'
@@ -27,7 +43,7 @@ if os.path.exists(font_path):
     
     # 终极补丁：强制全局接管 Label 和 Button 的属性表，杜绝 Kivy 悄悄回退到英文 Roboto 字体
     from kivy.lang import Builder
-    Builder.load_string(''''
+    Builder.load_string('''   # ✓ 3个引号
 <Label>:
     font_name: 'NotoSettings'
 <Button>:
@@ -36,7 +52,7 @@ if os.path.exists(font_path):
     title_font: 'NotoSettings'
 ''')
 else:
-    print(f"！！！！警告：未能找到字体文件 {font_path} ！！！！")
+    Logger.warning('DishwasherApp', f'未能找到字体文件 {font_path}')
 
 
 # --- 核心组件导入 ---
@@ -141,167 +157,205 @@ class DishwasherControlApp(App):
         # 极简版安全隔离层：为每个Bleak操作创建一个独立的小线程去跑asyncio死循环
         # 这在 Android 11+ JNI 接口中比挂载全局 async_run 更不容易阻塞主界面
         def run_it():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(coro)
-            loop.close()
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(coro)
+                loop.close()
+            except Exception as e:
+                Logger.error('DishwasherApp', '异步任务异常: ' + str(e))
+                Clock.schedule_once(lambda dt: setattr(self.status_label, 'text', '操作失败: ' + str(e)[:25]))
         threading.Thread(target=run_it, daemon=True).start()
 
     def on_start(self):
-        print(f"[DEBUG] on_start() 被调用，平台: {kivy_platform}")
+        Logger.info('DishwasherApp', 'on_start() 被调用，平台: ' + str(kivy_platform))
         if kivy_platform == 'android':
             try:
                 from android.permissions import request_permissions, Permission
-                print("[DEBUG] 正在请求蓝牙权限...")
+                Logger.info('DishwasherApp', '正在请求蓝牙权限')
                 request_permissions([Permission.BLUETOOTH_SCAN, Permission.BLUETOOTH_CONNECT, Permission.ACCESS_FINE_LOCATION])
-                print("[DEBUG] 权限请求已发送")
+                Logger.info('DishwasherApp', '权限请求已发送')
             except Exception as e: 
-                print(f"[DEBUG] Permission Error: {e}")
+                Logger.error('DishwasherApp', 'Permission Error: ' + str(e))
 
     def show_device_list(self, instance):
-        content = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(10))
-        
-        # 顶部按钮栏
-        button_bar = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(10))
-        self.collapsed_btn = StyledButton(text="查看被折叠的信号")
-        self.collapsed_btn.btn_color = get_color_from_hex("#FF9800")
-        self.collapsed_btn.bind(on_release=self.show_collapsed_devices)
-        button_bar.add_widget(self.collapsed_btn)
-        content.add_widget(button_bar)
-        
-        # 设备列表
-        self.device_list_layout = GridLayout(cols=1, spacing=dp(5), size_hint_y=None)
-        self.device_list_layout.bind(minimum_height=self.device_list_layout.setter("height"))
-        scroll = ScrollView()
-        scroll.add_widget(self.device_list_layout)
-        content.add_widget(scroll)
-        
-        self.scan_popup = Popup(title="附近蓝牙设备（扫描中...）", content=content, size_hint=(0.9, 0.8))
-        self.scan_popup.open()
-        
-        # 用于记录已显示过的设备地址，避免重复添加
-        self.discovered_addresses = set()
-        # 用于存储被折叠的无名设备
-        self.collapsed_devices = []
-        
-        # 在主线程直接调用（不加 start_async）
-        self.scan_devices()
+        try:
+            content = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(10))
+            
+            # 顶部按钮栏
+            button_bar = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(10))
+            self.collapsed_btn = StyledButton(text="查看被折叠的信号")
+            self.collapsed_btn.btn_color = get_color_from_hex("#FF9800")
+            self.collapsed_btn.bind(on_release=self.show_collapsed_devices)
+            button_bar.add_widget(self.collapsed_btn)
+            content.add_widget(button_bar)
+            
+            # 设备列表
+            self.device_list_layout = GridLayout(cols=1, spacing=dp(5), size_hint_y=None)
+            self.device_list_layout.bind(minimum_height=self.device_list_layout.setter("height"))
+            scroll = ScrollView()
+            scroll.add_widget(self.device_list_layout)
+            content.add_widget(scroll)
+            
+            self.scan_popup = Popup(title="附近蓝牙设备（扫描中...）", content=content, size_hint=(0.9, 0.8))
+            self.scan_popup.open()
+            
+            # 用于记录已显示过的设备地址，避免重复添加
+            self.discovered_addresses = set()
+            # 用于存储被折叠的无名设备
+            self.collapsed_devices = []
+            
+            Logger.info('DishwasherApp', '弹窗打开成功，准备开始扫描')
+            # 在主线程直接调用（不加 start_async）
+            self.scan_devices()
+        except Exception as e:
+            Logger.error('DishwasherApp', 'show_device_list异常: ' + str(e))
+            self.status_label.text = '弹窗打开失败: ' + str(e)[:30]
+            self.status_label.color = (1, 0.2, 0.2, 1)
 
     def scan_devices(self):
-        if getattr(self, 'is_scanning', False): 
-            print("[DEBUG] 已有扫描在进行中")
-            return
-        self.is_scanning = True
-        print("[DEBUG] scan_devices() 被调用")
-        self.status_label.text = "正在后台初始化蓝牙硬件..."
-        
-        if BleakScanner is None:
-            print("[DEBUG] BleakScanner 为 None - Bleak 库导入失败！")
-            self.status_label.text = "请检查 buildozer bleak 依赖"
+        try:
+            if getattr(self, 'is_scanning', False): 
+                Logger.info('DishwasherApp', '已有扫描在进行中')
+                return
+            self.is_scanning = True
+            Logger.info('DishwasherApp', 'scan_devices() 被调用')
+            self.status_label.text = "正在后台初始化蓝牙硬件..."
+            
+            if BleakScanner is None:
+                Logger.error('DishwasherApp', 'BleakScanner 为 None - Bleak 库导入失败')
+                self.status_label.text = "❌ Bleak 库未安装，请检查依赖"
+                self.status_label.color = (1, 0.2, 0.2, 1)
+                self.is_scanning = False
+                return
+            
+            Logger.info('DishwasherApp', '启动异步扫描任务')
+            self.start_async(self._async_scan_task())
+        except Exception as e:
+            Logger.error('DishwasherApp', 'scan_devices异常: ' + str(e))
+            self.status_label.text = '扫描初始化失败: ' + str(e)[:25]
+            self.status_label.color = (1, 0.2, 0.2, 1)
             self.is_scanning = False
-            return
-        
-        print("[DEBUG] 启动异步扫描任务")
-        self.start_async(self._async_scan_task())
 
     async def _async_scan_task(self):
         """使用回调模式实时发现并显示蓝牙设备"""
         def detection_callback(device, advertisement_data):
-            # 该回调在每发现一个新设备时被触发
-            if device.address not in self.discovered_addresses:
-                self.discovered_addresses.add(device.address)
-                # 立即添加到UI
-                Clock.schedule_once(lambda dt: self._add_device_to_list(device))
+            try:
+                # 该回调在每发现一个新设备时被触发
+                if device.address not in self.discovered_addresses:
+                    self.discovered_addresses.add(device.address)
+                    # 立即添加到UI
+                    Clock.schedule_once(lambda dt: self._add_device_to_list(device))
+            except Exception as e:
+                Logger.error('DishwasherApp', 'detection_callback异常: ' + str(e))
         
         try:
+            Logger.info('DishwasherApp', '开始蓝牙扫描')
             # 使用 BleakScanner 的回调模式而不是阻塞式的 discover()
             # 在 Android 上，扫描时间需要足够长（30秒以上）以发现所有设备
             async with BleakScanner(detection_callback=detection_callback) as scanner:
+                Logger.info('DishwasherApp', '扫描器已启动，等待30秒')
                 #  关键修复：增加扫描时间到 30 秒（移动设备需要更长时间）
                 await asyncio.sleep(30.0)
             
+            Logger.info('DishwasherApp', '扫描完成')
             # 扫描完成后更新状态
             Clock.schedule_once(lambda dt: self._scan_complete())
         except Exception as e:
             error_msg = str(e)[:50]
-            print(f"[Bleak扫描错误] {error_msg}")  # 添加日志便于调试
-            Clock.schedule_once(lambda dt: setattr(self.status_label, "text", f"扫描异常: {error_msg}"))
+            Logger.error('DishwasherApp', '扫描错误: ' + error_msg)
+            Clock.schedule_once(lambda dt: setattr(self.status_label, "text", "❌ 扫描异常: " + error_msg))
+            Clock.schedule_once(lambda dt: setattr(self.status_label, "color", (1, 0.2, 0.2, 1)))
             Clock.schedule_once(lambda dt: setattr(self, 'is_scanning', False))
 
     def _add_device_to_list(self, device):
         """将单个发现的设备添加到列表中"""
-        # 过滤掉无名设备，保存到折叠列表
-        if not device.name:
-            self.collapsed_devices.append(device)
-            # 更新按钮显示折叠设备数量
-            Clock.schedule_once(lambda dt: self._update_collapsed_button())
-            return
-        
-        d_name = device.name
-        btn = StyledButton(text=f"{d_name}\n[size=12sp]{device.address}[/size]", markup=True)
-        btn.btn_color = get_color_from_hex("#424242")
-        btn.height = dp(60)
-        btn.size_hint_y = None
-        btn.bind(on_release=lambda x, dev=device: self.start_async(self.connect_to_device(dev)))
-        self.device_list_layout.add_widget(btn)
-        
-        # 更新设备计数
-        count = len(self.discovered_addresses)
-        self.scan_popup.title = f"附近蓝牙设备 (已发现 {count} 台，扫描中...)"
-
-    def _update_collapsed_button(self):
-        """更新折叠按钮显示数量"""
-        if hasattr(self, 'collapsed_btn'):
-            count = len(self.collapsed_devices)
-            self.collapsed_btn.text = f"查看被折叠的信号 ({count})"
-
-    def _scan_complete(self):
-        """扫描完成时的处理"""
-        count = len(self.discovered_addresses)
-        if count == 0:
-            self.status_label.text = "扫描完成: 未发现设备 (请检查定位和蓝牙)"
-            self.status_label.color = (1, 0.5, 0, 1)
-        else:
-            self.status_label.text = f"扫描完成: 共发现 {count} 台设备"
-            self.status_label.color = (0, 0.6, 0, 1)
-        
-        self.scan_popup.title = f"附近蓝牙设备 (共 {count} 台)"
-        self.is_scanning = False
-
-    def show_collapsed_devices(self, instance):
-        """显示被折叠的无名蓝牙设备"""
-        if not self.collapsed_devices:
-            self.status_label.text = "没有被折叠的信号"
-            return
-        
-        # 创建弹窗内容
-        content = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(10))
-        
-        # 设备列表
-        collapsed_list = GridLayout(cols=1, spacing=dp(5), size_hint_y=None)
-        collapsed_list.bind(minimum_height=collapsed_list.setter("height"))
-        
-        for device in self.collapsed_devices:
-            # 显示设备地址或者未知设备
-            dev_text = f"未知设备\n[size=12sp]{device.address}[/size]"
-            btn = StyledButton(text=dev_text, markup=True)
-            btn.btn_color = get_color_from_hex("#666666")
+        try:
+            # 过滤掉无名设备，保存到折叠列表
+            if not device.name:
+                self.collapsed_devices.append(device)
+                # 更新按钮显示折叠设备数量
+                Clock.schedule_once(lambda dt: self._update_collapsed_button())
+                return
+            
+            d_name = device.name
+            btn = StyledButton(text=f"{d_name}\n[size=12sp]{device.address}[/size]", markup=True)
+            btn.btn_color = get_color_from_hex("#424242")
             btn.height = dp(60)
             btn.size_hint_y = None
             btn.bind(on_release=lambda x, dev=device: self.start_async(self.connect_to_device(dev)))
-            collapsed_list.add_widget(btn)
-        
-        scroll = ScrollView()
-        scroll.add_widget(collapsed_list)
-        content.add_widget(scroll)
-        
-        # 创建弹窗
-        popup = Popup(
-            title=f"被折叠的信号 (共 {len(self.collapsed_devices)} 个)",
-            content=content,
-            size_hint=(0.9, 0.8)
-        )
-        popup.open()
+            self.device_list_layout.add_widget(btn)
+            
+            # 更新设备计数
+            count = len(self.discovered_addresses)
+            self.scan_popup.title = f"附近蓝牙设备 (已发现 {count} 台，扫描中...)"
+        except Exception as e:
+            Logger.error('DishwasherApp', '_add_device_to_list异常: ' + str(e))
+
+    def _update_collapsed_button(self):
+        """更新折叠按钮显示数量"""
+        try:
+            if hasattr(self, 'collapsed_btn'):
+                count = len(self.collapsed_devices)
+                self.collapsed_btn.text = f"查看被折叠的信号 ({count})"
+        except Exception as e:
+            Logger.error('DishwasherApp', '_update_collapsed_button异常: ' + str(e))
+
+    def _scan_complete(self):
+        """扫描完成时的处理"""
+        try:
+            count = len(self.discovered_addresses)
+            if count == 0:
+                self.status_label.text = "扫描完成: 未发现设备 (请检查定位和蓝牙)"
+                self.status_label.color = (1, 0.5, 0, 1)
+            else:
+                self.status_label.text = f"扫描完成: 共发现 {count} 台设备"
+                self.status_label.color = (0, 0.6, 0, 1)
+            
+            self.scan_popup.title = "附近蓝牙设备 (共 " + str(count) + " 台)"
+            Logger.info('DishwasherApp', '扫描完成，发现 ' + str(count) + ' 台设备')
+            self.is_scanning = False
+        except Exception as e:
+            Logger.error('DishwasherApp', '_scan_complete异常: ' + str(e))
+
+    def show_collapsed_devices(self, instance):
+        """显示被折叠的无名蓝牙设备"""
+        try:
+            if not self.collapsed_devices:
+                self.status_label.text = "没有被折叠的信号"
+                return
+            
+            # 创建弹窗内容
+            content = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(10))
+            
+            # 设备列表
+            collapsed_list = GridLayout(cols=1, spacing=dp(5), size_hint_y=None)
+            collapsed_list.bind(minimum_height=collapsed_list.setter("height"))
+            
+            for device in self.collapsed_devices:
+                # 显示设备地址或者未知设备
+                dev_text = f"未知设备\n[size=12sp]{device.address}[/size]"
+                btn = StyledButton(text=dev_text, markup=True)
+                btn.btn_color = get_color_from_hex("#666666")
+                btn.height = dp(60)
+                btn.size_hint_y = None
+                btn.bind(on_release=lambda x, dev=device: self.start_async(self.connect_to_device(dev)))
+                collapsed_list.add_widget(btn)
+            
+            scroll = ScrollView()
+            scroll.add_widget(collapsed_list)
+            content.add_widget(scroll)
+            
+            # 创建弹窗
+            popup = Popup(
+                title=f"被折叠的信号 (共 {len(self.collapsed_devices)} 个)",
+                content=content,
+                size_hint=(0.9, 0.8)
+            )
+            popup.open()
+            Logger.info('DishwasherApp', '打开了 ' + str(len(self.collapsed_devices)) + ' 个被折叠的设备')
+        except Exception as e:
+            Logger.error('DishwasherApp', 'show_collapsed_devices异常: ' + str(e))
 
     def _render_scan_results(self, devices):
         self.device_list_layout.clear_widgets()
@@ -326,37 +380,59 @@ class DishwasherControlApp(App):
     async def connect_to_device(self, device):
         Clock.schedule_once(lambda dt: setattr(self.status_label, "text", "正在发起连接协议..."))
         try:
+            Logger.info('DishwasherApp', '连接到设备: ' + (device.name or device.address))
             self.client = BleakClient(device.address)
             await self.client.connect()
+            Logger.info('DishwasherApp', '连接成功: ' + str(device.name))
             Clock.schedule_once(lambda dt: self.on_connected(device))
         except Exception as e:
-            Clock.schedule_once(lambda dt: setattr(self.status_label, "text", f"连接失败: {str(e)[:30]}"))
+            error_msg = str(e)[:30]
+            Logger.error('DishwasherApp', '连接失败: ' + error_msg)
+            Clock.schedule_once(lambda dt: setattr(self.status_label, "text", "❌ 连接失败: " + error_msg))
+            Clock.schedule_once(lambda dt: setattr(self.status_label, "color", (1, 0.2, 0.2, 1)))
 
     def on_connected(self, device):
-        if hasattr(self, 'scan_popup'): self.scan_popup.dismiss()
-        self.status_label.text = f"已连接: {device.name or '目标洗碗机'}"
-        self.status_label.color = get_color_from_hex("#4CAF50")
+        try:
+            if hasattr(self, 'scan_popup'): 
+                self.scan_popup.dismiss()
+            self.status_label.text = "✓ 已连接: " + (device.name or '目标洗碗机')
+            self.status_label.color = get_color_from_hex("#4CAF50")
+            Logger.info('DishwasherApp', 'UI已更新连接状态')
+        except Exception as e:
+            Logger.error('DishwasherApp', 'on_connected异常: ' + str(e))
 
     async def disconnect_device(self):
-        if self.client and self.client.is_connected:
-            await self.client.disconnect()
-        Clock.schedule_once(self.on_disconnected)
+        try:
+            if self.client and self.client.is_connected:
+                Logger.info('DishwasherApp', '断开蓝牙连接')
+                await self.client.disconnect()
+            Clock.schedule_once(self.on_disconnected)
+        except Exception as e:
+            Logger.error('DishwasherApp', '断开连接失败: ' + str(e))
 
     def on_disconnected(self, dt=None):
-        self.status_label.text = "设备已被手动断开"
-        self.status_label.color = get_color_from_hex("#F44336")
+        try:
+            self.status_label.text = "设备已被手动断开"
+            self.status_label.color = get_color_from_hex("#F44336")
+            Logger.info('DishwasherApp', '设备已断开连接')
+        except Exception as e:
+            Logger.error('DishwasherApp', 'on_disconnected异常: ' + str(e))
 
     async def send_command(self, cmd_hex, name):
         Clock.schedule_once(lambda dt: setattr(self.log_label, "text", f"尝试发送: {name}"))
-        if self.client and self.client.is_connected:
-            try:
+        try:
+            if self.client and self.client.is_connected:
+                Logger.info('DishwasherApp', '发送命令: ' + name)
                 # 示例指令写入，您之后可根据真实 UUID 修改
                 # await self.client.write_gatt_char("0000ffe1-0000-1000-8000-00805f9b34fb", cmd_hex)
-                Clock.schedule_once(lambda dt: setattr(self.log_label, "text", f"[{name}] 数据已送达"))
-            except Exception as e:
-                Clock.schedule_once(lambda dt: setattr(self.log_label, "text", f"发送出错: {str(e)[:25]}"))
-        else:
-            Clock.schedule_once(lambda dt: setattr(self.log_label, "text", "拒绝发送：当前未连接任何设备"))
+                Clock.schedule_once(lambda dt: setattr(self.log_label, "text", "[" + name + "] 数据已送达"))
+            else:
+                Clock.schedule_once(lambda dt: setattr(self.log_label, "text", "拒绝发送：当前未连接任何设备"))
+                Logger.warning('DishwasherApp', '拒绝发送：未连接设备')
+        except Exception as e:
+            error_msg = str(e)[:25]
+            Clock.schedule_once(lambda dt: setattr(self.log_label, "text", "❌ 发送出错: " + error_msg))
+            Logger.error('DishwasherApp', '发送命令失败: ' + error_msg)
 
 if __name__ == "__main__":
     DishwasherControlApp().run()
