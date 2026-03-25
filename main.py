@@ -156,13 +156,29 @@ class DishwasherControlApp(App):
 
     def show_device_list(self, instance):
         content = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(10))
+        
+        # 顶部按钮栏
+        button_bar = BoxLayout(size_hint_y=None, height=dp(50), spacing=dp(10))
+        self.collapsed_btn = StyledButton(text="查看被折叠的信号")
+        self.collapsed_btn.btn_color = get_color_from_hex("#FF9800")
+        self.collapsed_btn.bind(on_release=self.show_collapsed_devices)
+        button_bar.add_widget(self.collapsed_btn)
+        content.add_widget(button_bar)
+        
+        # 设备列表
         self.device_list_layout = GridLayout(cols=1, spacing=dp(5), size_hint_y=None)
         self.device_list_layout.bind(minimum_height=self.device_list_layout.setter("height"))
         scroll = ScrollView()
         scroll.add_widget(self.device_list_layout)
         content.add_widget(scroll)
-        self.scan_popup = Popup(title="附近蓝牙设备 (下拉滚动)", content=content, size_hint=(0.9, 0.8))
+        
+        self.scan_popup = Popup(title="附近蓝牙设备（扫描中...）", content=content, size_hint=(0.9, 0.8))
         self.scan_popup.open()
+        
+        # 用于记录已显示过的设备地址，避免重复添加
+        self.discovered_addresses = set()
+        # 用于存储被折叠的无名设备
+        self.collapsed_devices = []
         
         # 在主线程直接调用（不加 start_async）
         self.scan_devices()
@@ -181,25 +197,114 @@ class DishwasherControlApp(App):
         self.start_async(self._async_scan_task())
 
     async def _async_scan_task(self):
+        """使用回调模式实时发现并显示蓝牙设备"""
+        def detection_callback(device, advertisement_data):
+            # 该回调在每发现一个新设备时被触发
+            if device.address not in self.discovered_addresses:
+                self.discovered_addresses.add(device.address)
+                # 立即添加到UI
+                Clock.schedule_once(lambda dt: self._add_device_to_list(device))
+        
         try:
-            # 脱离主线程的安全独立扫描，设置较长超时以确保设备收集
-            devices = await BleakScanner.discover(timeout=16.0)
-            Clock.schedule_once(lambda dt: self._render_scan_results(devices))
+            # 使用 BleakScanner 的回调模式而不是阻塞式的 discover()
+            async with BleakScanner(detection_callback=detection_callback) as scanner:
+                # 持续扫描 16 秒
+                await asyncio.sleep(16.0)
+            
+            # 扫描完成后更新状态
+            Clock.schedule_once(lambda dt: self._scan_complete())
         except Exception as e:
             Clock.schedule_once(lambda dt: setattr(self.status_label, "text", f"扫描异常: {str(e)[:30]}"))
             Clock.schedule_once(lambda dt: setattr(self, 'is_scanning', False))
 
-    def _render_scan_results(self, devices):
-        self.device_list_layout.clear_widgets()
-        if not devices:
+    def _add_device_to_list(self, device):
+        """将单个发现的设备添加到列表中"""
+        # 过滤掉无名设备，保存到折叠列表
+        if not device.name:
+            self.collapsed_devices.append(device)
+            # 更新按钮显示折叠设备数量
+            Clock.schedule_once(lambda dt: self._update_collapsed_button())
+            return
+        
+        d_name = device.name
+        btn = StyledButton(text=f"{d_name}\n[size=12sp]{device.address}[/size]", markup=True)
+        btn.btn_color = get_color_from_hex("#424242")
+        btn.height = dp(60)
+        btn.size_hint_y = None
+        btn.bind(on_release=lambda x, dev=device: self.start_async(self.connect_to_device(dev)))
+        self.device_list_layout.add_widget(btn)
+        
+        # 更新设备计数
+        count = len(self.discovered_addresses)
+        self.scan_popup.title = f"附近蓝牙设备 (已发现 {count} 台，扫描中...)"
+    
+    def _update_collapsed_button(self):
+        """更新折叠按钮显示数量"""
+        if hasattr(self, 'collapsed_btn'):
+            count = len(self.collapsed_devices)
+            self.collapsed_btn.text = f"查看被折叠的信号 ({count})"
+    
+    def _scan_complete(self):
+        """扫描完成时的处理"""
+        count = len(self.discovered_addresses)
+        if count == 0:
             self.status_label.text = "扫描完成: 未发现设备 (请检查定位和蓝牙)"
             self.status_label.color = (1, 0.5, 0, 1)
         else:
-            self.status_label.text = f"扫描完成: 发现 {len(devices)} 台设备"
+            self.status_label.text = f"扫描完成: 共发现 {count} 台设备"
+            self.status_label.color = (0, 0.6, 0, 1)
+        
+        self.scan_popup.title = f"附近蓝牙设备 (共 {count} 台)"
+        self.is_scanning = False
+
+    def show_collapsed_devices(self, instance):
+        """显示被折叠的无名蓝牙设备"""
+        if not self.collapsed_devices:
+            self.status_label.text = "没有被折叠的信号"
+            return
+        
+        # 创建弹窗内容
+        content = BoxLayout(orientation="vertical", padding=dp(10), spacing=dp(10))
+        
+        # 设备列表
+        collapsed_list = GridLayout(cols=1, spacing=dp(5), size_hint_y=None)
+        collapsed_list.bind(minimum_height=collapsed_list.setter("height"))
+        
+        for device in self.collapsed_devices:
+            # 显示设备地址或者未知设备
+            dev_text = f"未知设备\n[size=12sp]{device.address}[/size]"
+            btn = StyledButton(text=dev_text, markup=True)
+            btn.btn_color = get_color_from_hex("#666666")
+            btn.height = dp(60)
+            btn.size_hint_y = None
+            btn.bind(on_release=lambda x, dev=device: self.start_async(self.connect_to_device(dev)))
+            collapsed_list.add_widget(btn)
+        
+        scroll = ScrollView()
+        scroll.add_widget(collapsed_list)
+        content.add_widget(scroll)
+        
+        # 创建弹窗
+        popup = Popup(
+            title=f"被折叠的信号 (共 {len(self.collapsed_devices)} 个)",
+            content=content,
+            size_hint=(0.9, 0.8)
+        )
+        popup.open()
+
+    def _render_scan_results(self, devices):
+        self.device_list_layout.clear_widgets()
+        # 过滤掉无名设备
+        named_devices = [d for d in devices if d.name]
+        
+        if not named_devices:
+            self.status_label.text = "扫描完成: 未发现有效设备"
+            self.status_label.color = (1, 0.5, 0, 1)
+        else:
+            self.status_label.text = f"扫描完成: 发现 {len(named_devices)} 台设备"
             self.status_label.color = (0, 0.6, 0, 1) 
-            for d in devices:
-                d_name = d.name if d.name else "未知设备"
-                btn = StyledButton(text=f"{d_name}\n[size=12sp]{d.address}[/size]", markup=True)
+            for d in named_devices:
+                btn = StyledButton(text=f"{d.name}\n[size=12sp]{d.address}[/size]", markup=True)
                 btn.btn_color = get_color_from_hex("#424242")
                 btn.height = dp(60)
                 btn.size_hint_y = None
