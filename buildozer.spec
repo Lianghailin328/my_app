@@ -38,8 +38,7 @@ version = 0.1
 # (list) Application requirements
 # comma separated e.g. requirements = sqlite3,kivy
 # ⚠️ 这里加入了关键的 android 和 jnius 依赖供 Bleak 底层调用
-requirements = python3==3.9.9,hostpython3==3.9.9,kivy==2.3.0,android,jnius,bleak==0.20.1
-# (str) Custom source folders for requirements
+requirements = python3,kivy==2.3.0,bleak,jnius# (str) Custom source folders for requirements
 # Sets custom source for any requirements with recipes
 # requirements.source.kivy = ../../kivy
 
@@ -284,7 +283,7 @@ android.enable_androidx = True
 
 # (list) The Android archs to build for, choices: armeabi-v7a, arm64-v8a, x86, x86_64
 # In past, was `android.arch` as we weren't supporting builds for multiple archs at the same time.
-android.archs = arm64-v8a, armeabi-v7a
+android.archs = arm64-v8a
 
 # (int) overrides automatic versionCode computation (used in build.gradle)
 # this is not the same as app version and should only be edited if you know what you're doing
@@ -350,7 +349,7 @@ android.allow_backup = True
 p4a.setup_py = false
 
 # (str) extra command line arguments to pass when invoking pythonforandroid.toolchain
-#p4a.extra_args =
+p4a.extra_args = --use-pep517
 
 
 
